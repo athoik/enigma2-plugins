@@ -132,7 +132,8 @@ class AutoTimerOverview(Screen, HelpableScreen):
 			autotimerHelp.open(self.session)
 
 	def setCustomTitle(self):
-		self.setTitle(_("AutoTimer overview"))
+		from plugin import AUTOTIMER_VERSION
+		self.setTitle(_("AutoTimer overview") + _(" - Version: ") + AUTOTIMER_VERSION)
 
 	def createSummary(self):
 		return AutoTimerOverviewSummary
@@ -230,7 +231,7 @@ class AutoTimerOverview(Screen, HelpableScreen):
 					recordHandler = NavigationInstance.instance.RecordTimer
 					for timer in recordHandler.timer_list[:]:
 						if timer:
-							if timer.name == cur.name and (hasattr(timer, "isAutoTimer") or "newAT" in timer.tags):
+							if timer.name == cur.name and ("autotimer" in timer.flags):
 								try:
 									if not timer.isRunning():
 										NavigationInstance.instance.RecordTimer.removeEntry(timer)

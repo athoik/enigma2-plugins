@@ -50,13 +50,11 @@ from . import config, xrange, itervalues
 
 XML_CONFIG = "/etc/enigma2/autotimer.xml"
 
-TAG = "newAT"
-
-def getTimeDiff(timer, begin, end):
-	if begin <= timer.begin <= end:
-		return end - timer.begin
-	elif timer.begin <= begin <= timer.end:
-		return timer.end - begin
+def getTimeDiff(timerbegin, timerend, begin, end):
+	if begin <= timerbegin <= end:
+		return end - timerbegin
+	elif timerbegin <= begin <= timerend:
+		return timerend - begin
 	return 0
 
 def blockingCallFromMainThread(f, *a, **kw):
@@ -207,9 +205,6 @@ class AutoTimer:
 		new = 0
 		modified = 0
 
-		# Precompute timer destination dir
-		dest = timer.destination or config.usage.default_path.value
-
 		# Workaround to allow search for umlauts if we know the encoding
 		#match = timer.match
 		match = timer.match.replace('\xc2\x86', '').replace('\xc2\x87', '')
@@ -319,10 +314,14 @@ class AutoTimer:
 
 			startLog()
 
+			# timer destination dir
+			dest = timer.destination
+
 			evtBegin = begin
 			evtEnd = end = begin + duration
 
 			doLog("[AutoTimer] possible epgmatch %s" % (name))
+			doLog("[AutoTimer] Serviceref %s" % (str(serviceref)))
 			eserviceref = eServiceReference(serviceref)
 			evt = epgcache.lookupEventId(eserviceref, eit)
 			if not evt:
@@ -333,6 +332,7 @@ class AutoTimer:
 			n = evt.getNumOfLinkageServices()
 			if n > 0:
 				i = evt.getLinkageService(eserviceref, n-1)
+				doLog("[AutoTimer] Serviceref2 %s" % (str(serviceref)))
 				serviceref = i.toString()
 
 			evtBegin = begin
@@ -392,8 +392,7 @@ class AutoTimer:
 			# Initialize
 			newEntry = None
 			oldExists = False
-			dirname = None
-			
+
 			# Eventually change service to alternative
 			if timer.overrideAlternatives:
 				serviceref = timer.getAlternative(serviceref)
@@ -401,24 +400,25 @@ class AutoTimer:
 			if timer.series_labeling and sp_getSeasonEpisode is not None:
 				#doLog("[AutoTimer SeriesPlugin] Request name, desc, path %s %s %s" % (name,shortdesc,dest))
 				sp = sp_getSeasonEpisode(serviceref, name, evtBegin, evtEnd, shortdesc, dest)
-				if sp and len(sp) == 4:
-					name = sp[0]
-					shortdesc = sp[1]
-					dirname = sp[2]
+				if sp and type(sp) in (tuple, list) and len(sp) == 4:
+					name = sp[0] or name
+					shortdesc = sp[1] or shortdesc
+					dest = sp[2] or dest
 					doLog(str(sp[3]))
-					#doLog("[AutoTimer SeriesPlugin] Returned name, desc, path %s %s %s" % (name,shortdesc,dirname))
+					#doLog("[AutoTimer SeriesPlugin] Returned name, desc, path %s %s %s" % (name,shortdesc,dest))
 				else:
 					# Nothing found
 					doLog(str(sp))
 					# If AutoTimer name not equal match, do a second lookup with the name
 					if timer.name.lower() != timer.match.lower():
+						#doLog("[AutoTimer SeriesPlugin] Request name, desc, path %s %s %s" % (timer.name,shortdesc,dest))
 						sp = sp_getSeasonEpisode(serviceref, timer.name, evtBegin, evtEnd, shortdesc, dest)
-						if sp and len(sp) == 4:
-							name = sp[0]
-							shortdesc = sp[1]
-							dirname = sp[2]
+						if sp and type(sp) in (tuple, list) and len(sp) == 4:
+							name = sp[0] or name
+							shortdesc = sp[1] or shortdesc
+							dest = sp[2] or dest
 							doLog(str(sp[3]))
-							#doLog("Returned name, desc, path %s %s %s" % (name,shortdesc,dirname))
+							#doLog("[AutoTimer SeriesPlugin] Returned name, desc, path %s %s %s" % (name,shortdesc,dest))
 						else:
 							doLog(str(sp))
 
@@ -465,11 +465,25 @@ class AutoTimer:
 					doLog("[AutoTimer] We found a timer based on eit")
 					newEntry = rtimer
 					break
-				elif config.plugins.autotimer.try_guessing.value and getTimeDiff(rtimer, evtBegin, evtEnd) > ((duration/10)*8):
-					oldExists = True
-					doLog("[AutoTimer] We found a timer based on time guessing")
-					newEntry = rtimer
-					break
+				elif config.plugins.autotimer.try_guessing.value:
+					if timer.hasOffset():
+						# Remove custom Offset
+						rbegin = rtimer.begin + timer.offset[0] * 60
+						rend = rtimer.end - timer.offset[1] * 60
+					else:
+						# Remove E2 Offset
+						rbegin = rtimer.begin + config.recording.margin_before.value * 60
+						rend = rtimer.end - config.recording.margin_after.value * 60
+					# As alternative we could also do a epg lookup
+					#revent = epgcache.lookupEventId(rtimer.service_ref.ref, rtimer.eit)
+					#rbegin = revent.getBeginTime() or 0
+					#rduration = revent.getDuration() or 0
+					#rend = rbegin + rduration or 0
+					if getTimeDiff(rbegin, rend, evtBegin, evtEnd) > ((duration/10)*8):
+						oldExists = True
+						doLog("[AutoTimer] We found a timer based on time guessing")
+						newEntry = rtimer
+						break
 				elif timer.avoidDuplicateDescription >= 1 \
 					and not rtimer.disabled:
 						if self.checkDuplicates(timer, name, rtimer.name, shortdesc, rtimer.description, extdesc, rtimer.extdesc ):
@@ -514,27 +528,34 @@ class AutoTimer:
 					doLog("[AutoTimer] Won't modify existing timer because either no modification allowed or repeated timer")
 					continue
 
-				if hasattr(newEntry, "isAutoTimer") or TAG in newEntry.tags:
-					newEntry.log(501, "[AutoTimer] AutoTimer %s modified this automatically generated timer." % (timer.name))
+				if "autotimer" in newEntry.flags:
+					msg = "[AutoTimer] AutoTimer %s modified this automatically generated timer." % (timer.name)
+					doLog(msg)
+					newEntry.log(501, msg)
 				else:
 					if config.plugins.autotimer.refresh.value != "all":
 						doLog("[AutoTimer] Won't modify existing timer because it's no timer set by us")
 						continue
 
-					newEntry.log(501, "[AutoTimer] Warning, AutoTimer %s messed with a timer which might not belong to it: %s ." % (timer.name, newEntry.name))
+					msg = "[AutoTimer] Warning, AutoTimer %s messed with a timer which might not belong to it: %s ." % (timer.name, newEntry.name)
+					doLog(msg)
+					newEntry.log(501, msg)
 
 				modified += 1
 
 				self.modifyTimer(newEntry, name, shortdesc, begin, end, serviceref, eit)
-				newEntry.log(501, "[AutoTimer] AutoTimer modified timer: %s ." % (newEntry.name))
+				msg = "[AutoTimer] AutoTimer modified timer: %s ." % (newEntry.name)
+				doLog(msg)
+				newEntry.log(501, msg)
 			else:
 				newEntry = RecordTimerEntry(ServiceReference(serviceref), begin, end, name, shortdesc, eit)
-				newEntry.log(500, "[AutoTimer] Try to add new timer based on AutoTimer %s." % (timer.name))
 
-				# Mark this entry as AutoTimer (only AutoTimers will have this Attribute set)
-				# It is only temporarily, after a restart it will be lost,
-				# because it won't be stored in the timer xml file
-				newEntry.isAutoTimer = True
+				msg = "[AutoTimer] Try to add new timer based on AutoTimer %s." % (timer.name)
+				doLog(msg)
+				newEntry.log(500, msg)
+
+				# Mark this entry as AutoTimer
+				newEntry.flags.add("autotimer")
 
 			# Apply afterEvent
 			if timer.hasAfterEvent():
@@ -544,7 +565,8 @@ class AutoTimer:
 				if afterEvent is not None:
 					newEntry.afterEvent = afterEvent
 
-			newEntry.dirname = dirname or timer.destination
+			newEntry.dirname = dest
+			newEntry.calculateFilename()
 			newEntry.justplay = timer.justplay
 			newEntry.vpsplugin_enabled = timer.vps_enabled
 			newEntry.vpsplugin_overwrite = timer.vps_overwrite
@@ -560,22 +582,19 @@ class AutoTimer:
 				if tagname:
 					tagname = tagname[0].upper() + tagname[1:].replace(" ", "_")
 					tags.append(tagname)
-			if TAG not in tags:
-				tags.append(TAG)
 			newEntry.tags = tags
 
 			if oldExists:
 				# XXX: this won't perform a sanity check, but do we actually want to do so?
 				recordHandler.timeChanged(newEntry)
 
-				#if renameTimer is not None and timer.series_labeling:
-				#	renameTimer(newEntry, name, evtBegin, evtEnd)
-
 			else:
 				conflictString = ""
 				if similarTimer:
 					conflictString = similardict[eit].conflictString
-					newEntry.log(504, "[AutoTimer] Try to add similar Timer because of conflicts with %s." % (conflictString))
+					msg = "[AutoTimer] Try to add similar Timer because of conflicts with %s." % (conflictString)
+					doLog(msg)
+					newEntry.log(504, msg)
 
 				# Try to add timer
 				conflicts = recordHandler.record(newEntry)
@@ -629,7 +648,9 @@ class AutoTimer:
 					conflicting.append((name, begin, end, serviceref, timer.name))
 
 					if config.plugins.autotimer.disabled_on_conflict.value:
-						newEntry.log(503, "[AutoTimer] Timer disabled because of conflicts with %s." % (conflictString))
+						msg = "[AutoTimer] Timer disabled because of conflicts with %s." % (conflictString)
+						doLog(msg)
+						newEntry.log(503, msg)
 						newEntry.disabled = True
 						# We might want to do the sanity check locally so we don't run it twice - but I consider this workaround a hack anyway
 						conflicts = recordHandler.record(newEntry)
@@ -640,6 +661,10 @@ class AutoTimer:
 		return (new, modified)
 
 	def parseEPG(self, simulateOnly=False, uniqueId=None, callback=None):
+ 
+		from plugin import AUTOTIMER_VERSION
+		doLog("AutoTimer Version: " + AUTOTIMER_VERSION)
+
 		if NavigationInstance.instance is None:
 			doLog("Navigation is not available, can't parse EPG")
 			return (0, 0, 0, [], [], [])
@@ -719,21 +744,23 @@ class AutoTimer:
 
 		if config.plugins.autotimer.check_eit_and_remove.value:
 			for timer in remove:
-				if hasattr(timer, "isAutoTimer") or TAG in timer.tags:
+				if "autotimer" in timer.flags:
 					try:
 						# Because of the duplicate check, we only want to remove future timer
 						if timer in recordHandler.timer_list:
 							if not timer.isRunning():
 								recordHandler.removeEntry(timer)
-								doLog("[AutoTimer] Delete timer %s." % (timer.name))
+								doLog("[AutoTimer] Remove timer because of eit check %s." % (timer.name))
 					except:
 						pass
 		del remove
 
 	def modifyTimer(self, timer, name, shortdesc, begin, end, serviceref, eit=None):
-		# Don't update the name, it will overwrite the name of the SeriesPlugin
-		#timer.name = name
-		#timer.description = shortdesc
+		# Only update the name and description if we got a "new" one
+		if len(timer.name) < len(name):
+			timer.name = name
+		if len(timer.description) < len(shortdesc):
+			timer.description = shortdesc
 		timer.begin = int(begin)
 		timer.end = int(end)
 		timer.service_ref = ServiceReference(serviceref)

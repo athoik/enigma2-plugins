@@ -9,7 +9,6 @@ SUBDIRS = \
 	autoresolution \
 	autotimer \
 	babelzapper \
-	bitrateviewer \
 	blindscan \
 	bonjour \
 	cdinfo \
@@ -80,7 +79,6 @@ SUBDIRS = \
 	weatherplugin \
 	webcamviewer \
 	werbezapper \
-	youtubeplayer \
 	zaphistorybrowser \
 	zapstatistic \
 	zdfmediathek

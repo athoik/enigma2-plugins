@@ -5,6 +5,7 @@ from enigma import eEPGCache, eServiceReference, eServiceCenter, RT_HALIGN_LEFT,
 		RT_HALIGN_CENTER, RT_VALIGN_CENTER, RT_WRAP, eListboxPythonMultiContent, gFont, ePicLoad
 from Tools.Directories import resolveFilename, SCOPE_CURRENT_SKIN, SCOPE_SKIN_IMAGE, fileExists
 from Tools.LoadPixmap import LoadPixmap
+from Tools.Alternatives import GetWithAlternative
 from ServiceReference import ServiceReference
 from EPGSearchSetup import EPGSearchSetup
 from Screens.ChannelSelection import SimpleChannelSelection
@@ -1007,10 +1008,7 @@ class EPGSearch(EPGSelection):
 					service = servicelist.getNext()
 					if not service.valid(): break
 					if not (service.flags & (eServiceReference.isMarker|eServiceReference.isDirectory)):
-						if config.plugins.epgsearch.favorit_name.value:
-							usr_ref_list.append(service.toString())
-						else:
-							usr_ref_list.append(':'.join(service.toString().split(':')[:11]))
+						usr_ref_list.append(service.toString())
 		else:
 			bqrootstr = '1:7:1:0:0:0:0:0:0:0:FROM BOUQUET "bouquets.tv" ORDER BY bouquet'
 			bouquet = eServiceReference(bqrootstr)
@@ -1019,29 +1017,28 @@ class EPGSearch(EPGSelection):
 				while True:
 					bouquet = bouquetlist.getNext()
 					if not bouquet.valid(): break
-					if bouquet.flags & eServiceReference.isDirectory:
+					if bouquet.flags & eServiceReference.isDirectory and not bouquet.flags & eServiceReference.isInvisible:
 						servicelist = serviceHandler.list(bouquet)
 						if not servicelist is None:
 							while True:
 								service = servicelist.getNext()
 								if not service.valid(): break
 								if not (service.flags & (eServiceReference.isMarker|eServiceReference.isDirectory)):
-									if config.plugins.epgsearch.favorit_name.value:
-										usr_ref_list.append(service.toString())
-									else:
-										usr_ref_list.append(':'.join(service.toString().split(':')[:11]))
+									usr_ref_list.append(service.toString())
 		result = [ ]
 		if config.plugins.epgsearch.favorit_name.value:
 			for e in epglist:
 				for x in usr_ref_list:
-					y = ':'.join(x.split(':')[:11]) 
+					y = ':'.join(GetWithAlternative(x).split(':')[:11])
 					if y == e[0]:
 						new_e = (x, e[1], e[2], e[3], e[4])
 						result.append(new_e)
 		else:
 			for e in epglist:
-				if e[0] in usr_ref_list:
-					result.append(e)
+				for x in usr_ref_list:
+					y = ':'.join(GetWithAlternative(x).split(':')[:11])
+					if y == e[0]:
+						result.append(e)
 		return result
 
 class EPGSearchTimerImport(Screen):
@@ -1150,5 +1147,3 @@ class EPGSearchEPGSelection(EPGSelection):
 			)
 		else:
 			self.close(evt.getEventName())
-
-
